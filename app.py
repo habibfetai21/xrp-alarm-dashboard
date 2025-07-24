@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import datetime
+import pandas as pd
+from streamlit_autorefresh import st_autorefresh
 
 coins = {
     "XRP": "ripple",
@@ -11,7 +13,6 @@ coins = {
     "FLOKI": "floki"
 }
 
-# Cache mit manuellem Zeitcheck
 @st.cache_data(ttl=60)
 def fetch_prices():
     ids = ",".join(coins.values())
@@ -30,13 +31,13 @@ def fetch_market_chart(coin_id, days=7):
     prices = data.get("prices", [])
     dates = [datetime.datetime.fromtimestamp(p[0]/1000) for p in prices]
     values = [p[1] for p in prices]
-    return dates, values
+    df = pd.DataFrame({"Datum": dates, "Preis (EUR)": values})
+    df.set_index("Datum", inplace=True)
+    return df
 
 st.set_page_config(page_title="Xrp Alarm Plus", page_icon="🚨", layout="wide")
 st.title("🚨 Xrp Alarm Plus – Kurse & Charts in Euro")
 
-# UI refresht alle 15 Sekunden
-from streamlit_autorefresh import st_autorefresh
 st_autorefresh(interval=15 * 1000, key="refresh")
 
 try:
@@ -72,9 +73,9 @@ with col2:
         value=7
     )
     try:
-        dates, values = fetch_market_chart("ripple", days)
-        if dates:
-            st.line_chart({"Datum": dates, "Preis (EUR)": values})
+        df = fetch_market_chart("ripple", days)
+        if not df.empty:
+            st.line_chart(df)
         else:
             st.write("Chart-Daten nicht verfügbar")
     except Exception as e:
