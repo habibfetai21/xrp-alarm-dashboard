@@ -26,7 +26,10 @@ def get_prices():
 def get_market_chart(coin_id, days=7):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=eur&days={days}"
     try:
-        data = requests.get(url).json()
+        response = requests.get(url)
+        st.write(f"Chart API Status: {response.status_code}")
+        data = response.json()
+        st.write(f"Chart API Daten (Auszug): {str(data)[:500]}")  # zeigt ersten 500 Zeichen
         prices = data.get("prices", [])
         dates = [datetime.datetime.fromtimestamp(p[0]/1000) for p in prices]
         values = [p[1] for p in prices]
