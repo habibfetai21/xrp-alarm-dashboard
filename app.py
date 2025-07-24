@@ -81,4 +81,4 @@ with col2:
     except Exception as e:
         st.error(f"Fehler beim Laden des Charts: {e}")
 
-st.caption("🔄 Frontend refresh 15 s · Preise neu alle 60 s")
+st.caption("🔄 Frontend
