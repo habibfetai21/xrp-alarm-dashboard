@@ -47,4 +47,4 @@ for sym, pr in prices.items():
             st.write(text)
 
 st.caption("🔄 Auto-Update alle 15 Sekunden")
-    st.experimental_rerun()
+st.experimental_rerun()
