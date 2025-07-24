@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-import time
+from streamlit_autorefresh import st_autorefresh
 
 coins = {
     "XRP": "ripple",
@@ -27,25 +27,24 @@ def get_prices():
 st.set_page_config(page_title="Xrp Alarm", page_icon="🚨", layout="wide")
 st.title("🚨 Xrp Alarm – Live-Kurse & Alarme")
 
-placeholder = st.empty()
+# Automatischer Refresh alle 15 Sekunden
+st_autorefresh(interval=15 * 1000, key="refresh")
 
-while True:
-    prices = get_prices()
-    with placeholder.container():
-        for sym, pr in prices.items():
-            if pr is None:
-                st.write(f"⚠️ {sym}: Daten nicht verfügbar")
+prices = get_prices()
+for sym, pr in prices.items():
+    if pr is None:
+        st.write(f"⚠️ {sym}: Daten nicht verfügbar")
+    else:
+        text = f"{sym}: ${pr:.4f}"
+        if sym == "XRP":
+            if pr < 3.34:
+                st.error(text + " ⬇️ Unter 3.34!")
+            elif pr > 3.84:
+                st.success(text + " 🚀 Über 3.84!")
             else:
-                text = f"{sym}: ${pr:.4f}"
-                if sym == "XRP":
-                    if pr < 3.34:
-                        st.error(text + " ⬇️ Unter 3.34!")
-                    elif pr > 3.84:
-                        st.success(text + " 🚀 Über 3.84!")
-                    else:
-                        st.info(text)
-                else:
-                    st.write(text)
-        st.caption("🔄 Auto-Update alle 15 Sekunden")
-    time.sleep(15)
+                st.info(text)
+        else:
+            st.write(text)
+
+st.caption("🔄 Auto-Update alle 15 Sekunden")
     st.experimental_rerun()
