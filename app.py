@@ -81,4 +81,4 @@ with col2:
     except Exception as e:
         st.error(f"Fehler beim Laden des Charts: {e}")
 
-st.caption("🔄 Frontend
+st.caption
