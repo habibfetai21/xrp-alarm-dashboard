@@ -42,7 +42,7 @@ def fetch_technical(coin_id, days):
     # Indikatoren
     df["rsi"] = ta.momentum.rsi(df["close"], window=14)
     atr = ta.volatility.AverageTrueRange(high=df["close"], low=df["close"], close=df["close"], window=14)
-    df["supertrend"] = (df["close"] + atr.atr()) / 2  # vereinfachter Supertrend = Durchschnitt + ATR
+    df["supertrend"] = (df["close"] + df["atr"]) / 2
     return df
 
 prices = fetch_prices()
