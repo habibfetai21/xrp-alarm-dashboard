@@ -2,9 +2,8 @@ import streamlit as st
 import requests
 import pandas as pd
 import ta
-import matplotlib.pyplot as plt
 
-# Coin Liste mit CoinGecko IDs
+# Liste der Coins mit CoinGecko-IDs
 coins = {
     "XRP": "ripple",
     "BTC": "bitcoin",
@@ -18,7 +17,7 @@ coins = {
 st.set_page_config(page_title="Krypto Trend & Kauf Dashboard", page_icon="📈", layout="wide")
 st.title("📈 Krypto Trend & Kauf Dashboard")
 
-# Funktion: Preise abfragen
+# Funktion: Live-Preise holen
 def fetch_prices():
     ids = ",".join(coins.values())
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=eur"
@@ -28,14 +27,12 @@ def fetch_prices():
         return None
     return res.json()
 
-# Funktion: Kursdaten mit RSI und MA laden
+# Funktion: Chartdaten inklusive RSI, MA50, MA200 berechnen
 @st.cache_data(ttl=300)
 def fetch_market_data(coin_id, days=60):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=eur&days={days}"
     data = requests.get(url).json()
     prices = data.get("prices", [])
-    if not prices:
-        return None
     df = pd.DataFrame(prices, columns=["timestamp", "price"])
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
     df.set_index("timestamp", inplace=True)
@@ -50,23 +47,21 @@ if not prices:
     st.warning("Keine Preisdaten verfügbar.")
 else:
     for sym, cid in coins.items():
-        price = prices.get(cid, {}).get("eur")
-        if price is None:
-            st.write(f"{sym}: Daten nicht verfügbar")
+        eur_price = prices.get(cid, {}).get("eur")
+        if eur_price is None:
+            st.write(f"⚠️ {sym}: Preis nicht gefunden")
             continue
-        df = fetch_market_data(cid, days=30)
-        if df is None or df.empty:
-            st.write(f"{sym}: Marktdaten nicht verfügbar")
+
+        df = fetch_market_data(cid, days=60)
+        if df.empty:
+            st.write(f"⚠️ {sym}: Marktdaten nicht verfügbar")
             continue
 
         latest_rsi = df["rsi"].iloc[-1]
         ma50 = df["ma50"].iloc[-1]
         ma200 = df["ma200"].iloc[-1]
-
-        # Trend bestimmen: bullish wenn MA50 über MA200
         trend = "Bullish 📈" if ma50 > ma200 else "Bearish 📉"
 
-        # Kauf-/Verkaufssignal ableiten
         if latest_rsi < 30 and trend == "Bullish 📈":
             signal = "🚀 Kauf empfohlen!"
         elif latest_rsi > 70 and trend == "Bearish 📉":
@@ -74,19 +69,7 @@ else:
         else:
             signal = "➡️ Halten"
 
-        # Anzeige Header mit Preis & Signal
-        st.subheader(f"{sym}: €{price:.4f} | Trend: {trend} | RSI: {latest_rsi:.1f} | Signal: {signal}")
+        st.subheader(f"{sym}: €{eur_price:.6f} | {trend} | RSI: {latest_rsi:.1f} | {signal}")
+        st.line_chart(df[["price", "ma50", "ma200"]], height=250)
 
-        # Plot Kursverlauf der letzten 30 Tage
-        fig, ax = plt.subplots(figsize=(8, 3))
-        ax.plot(df.index, df["price"], label="Preis (EUR)")
-        ax.plot(df.index, df["ma50"], label="MA50")
-        ax.plot(df.index, df["ma200"], label="MA200")
-        ax.set_title(f"{sym} Kursverlauf letzte 30 Tage")
-        ax.set_xlabel("Datum")
-        ax.set_ylabel("Preis in €")
-        ax.legend()
-        ax.grid(True)
-        st.pyplot(fig)
-
-st.caption("Daten via CoinGecko API • RSI & MA berechnet • Updates alle 5 Minuten")
+st.caption("Daten via CoinGecko • RSI & MA • Auto-Refresh Deck 15 s • Cache 5 Min")
