@@ -5,13 +5,13 @@ import ta
 
 # Liste der Coins mit CoinGecko-IDs
 coins = {
-    "XRP": "ripple",
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "VECHAIN": "vechain",
-    "DOGE": "dogecoin",
-    "FLOKI": "floki",
-    "PEPE": "pepe"
+  "XRP": "ripple",
+  "BTC": "bitcoin",
+  "ETH": "ethereum",
+  "VECHAIN": "vechain",
+  "DOGE": "dogecoin",
+  "FLOKI": "floki",
+  "PEPE": "pepecoin-community"  # ID für die Community-Variante von PepeCoin
 }
 
 st.set_page_config(page_title="Krypto Trend & Kauf Dashboard", page_icon="📈", layout="wide")
