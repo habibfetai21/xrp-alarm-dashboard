@@ -81,4 +81,4 @@ with col2:
     st.line_chart(df["close"])
     st.line_chart(df["rsi"])
 
-st.caption("🔄 UI alle 15s • Daten alle 5min gecached • Signale: RSI & Supertrend") 
+st.caption("🔄 UI alle 15s • Dat
