@@ -17,20 +17,20 @@ def send_telegram_message(message):
     except Exception as e:
         st.error(f"Telegram Nachricht konnte nicht gesendet werden: {e}")
 
-# === Persönliches Portfolio (Coin -> [Menge, Einkaufspreis]) ===
+# === Persönliches Portfolio (Coin -> Menge) ===
 portfolio = {
-    "xrp": [1562, 17810.32],
-    "pepe": [67030227, 81257.26],
-    "toshi": [1240005, 931827.33],
-    "floki": [3963427, 93550.60],
-    "vision": [1796, 50929.71],
-    "vechain": [3915, 56782.78],
-    "zerebro": [2892, 77660.44],
-    "doge": [199, 2849.66],
-    "shiba-inu": [1615356, 17235.69],
+    "xrp": 1562,
+    "pepe": 67030227,
+    "toshi": 1240005,
+    "floki": 3963427,
+    "vision": 1796,
+    "vechain": 3915,
+    "zerebro": 2892,
+    "doge": 199,
+    "shiba-inu": 1615356,
 }
 
-# === CoinGecko IDs für Abruf
+# === CoinGecko IDs ===
 coins = {
     "xrp": "ripple",
     "pepe": "pepe",
@@ -43,7 +43,6 @@ coins = {
     "shiba-inu": "shiba-inu"
 }
 
-# === Datenabruf von CoinGecko ===
 @st.cache_data(ttl=900)
 def fetch_data(symbol, days=30):
     if not symbol:
@@ -63,12 +62,10 @@ def fetch_data(symbol, days=30):
     df["supertrend"] = (df["price"].rolling(window=3).mean() + df["price"].rolling(window=3).std()) / 2
     return df
 
-# === Analysefunktion ===
 def analyze(df, coin):
     latest = df.iloc[-1]
     price = latest["price"]
     rsi = latest["rsi"]
-    trend = latest["supertrend"]
 
     signal = ""
     if rsi < 30:
@@ -81,7 +78,6 @@ def analyze(df, coin):
         signal = f"📊 {coin.upper()}: €{round(price, 4)} – Beobachten (RSI: {round(rsi, 2)})"
     return signal, price
 
-# === Social-Media-Stimmung (Dummy-Daten) ===
 def fetch_sentiment(coin):
     trends = {
         "xrp": "Bullish 📈",
@@ -96,19 +92,17 @@ def fetch_sentiment(coin):
 
 # === Streamlit UI ===
 st.set_page_config(page_title="Krypto Portfolio Dashboard", layout="centered")
-st.title("💰 Erweitertes Krypto-Portfolio Dashboard")
+st.title("💰 Krypto-Portfolio Übersicht")
 
 portfolio_value = 0
-portfolio_cost = 0
 
 for symbol, coingecko_id in coins.items():
-    st.subheader(f"{symbol.upper()} – Analyse & Portfolio")
+    st.subheader(f"{symbol.upper()} – Analyse")
     df = fetch_data(coingecko_id)
     if df is not None and not df.empty:
         signal, price = analyze(df, symbol)
         st.write(signal)
 
-        # Chart anzeigen
         fig, ax = plt.subplots()
         df["price"].plot(ax=ax, label="Preis", color="blue")
         df["supertrend"].plot(ax=ax, label="Supertrend", linestyle="--", color="green")
@@ -116,30 +110,23 @@ for symbol, coingecko_id in coins.items():
         ax.legend()
         st.pyplot(fig)
 
-        # Portfolio-Berechnung
         if symbol in portfolio:
-            menge, einkauf = portfolio[symbol]
+            menge = portfolio[symbol]
             wert = menge * price
-            gewinn = wert - einkauf
             portfolio_value += wert
-            portfolio_cost += einkauf
-            st.success(f"📦 Bestand: {menge} — Aktueller Wert: €{wert:,.2f} — Gekauft für: €{einkauf:,.2f} — Gewinn/Verlust: €{gewinn:,.2f}")
+            st.success(f"📦 Bestand: {menge} — Aktueller Wert: €{wert:,.2f}")
         else:
             st.info("🔍 Kein Bestand erfasst.")
 
-        # Social Media Trend
         st.info(f"📣 Social-Media-Trend: {fetch_sentiment(symbol)}")
     else:
         st.warning(f"{symbol.upper()}: Kursdaten nicht verfügbar")
 
 # === Gesamtübersicht ===
 if portfolio_value > 0:
-    gesamtgewinn = portfolio_value - portfolio_cost
-    prozent = (gesamtgewinn / portfolio_cost) * 100
     st.subheader("📊 Gesamtwert Portfolio")
     st.success(f"💶 Gesamtwert: €{portfolio_value:,.2f}")
-    st.info(f"📉 Gesamt Gewinn/Verlust: €{gesamtgewinn:,.2f} ({prozent:.2f}%)")
 else:
-    st.error("❌ Portfolio konnte nicht berechnet werden – fehlen Kurse?")
+    st.error("❌ Portfolio konnte nicht berechnet werden – fehlen Kursdaten?")
 
-st.caption("🔄 Alle Daten aktualisieren sich alle 15 Minuten – basierend auf CoinGecko")
+st.caption("🔄 Aktualisierung alle 15 Minuten • RSI, Supertrend & Telegram-Signale aktiv")
