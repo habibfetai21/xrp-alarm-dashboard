@@ -1,170 +1,107 @@
 import streamlit as st
-import pandas as pd
 import requests
+import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
 
-# Telegram-Konfiguration
-TELEGRAM_TOKEN = "8105594323:AAGcB-zUIaUGhvITQ430Lt-NvmjkZE3mRtA"
-TELEGRAM_USER_ID = "7620460833"
+# Coins mit Coinpaprika IDs
+coins = {
+    "xrp": {"symbol": "XRP", "coinpaprika_id": "xrp-xrp"},
+    "btc": {"symbol": "BTC", "coinpaprika_id": "btc-bitcoin"},
+    "eth": {"symbol": "ETH", "coinpaprika_id": "eth-ethereum"},
+    "doge": {"symbol": "DOGE", "coinpaprika_id": "doge-dogecoin"},
+    "floki": {"symbol": "FLOKI", "coinpaprika_id": None},  # kein Eintrag? Dann nur CC
+    "pepe": {"symbol": "PEPE", "coinpaprika_id": None},
+    "vechain": {"symbol": "VET", "coinpaprika_id": "vet-vechain"},
+    "vision": {"symbol": "VISION", "coinpaprika_id": None},
+    "zerebro": {"symbol": "ZEREBRO", "coinpaprika_id": None},
+    "toshi": {"symbol": "TOSHI", "coinpaprika_id": None},
+    "shiba-inu": {"symbol": "SHIB", "coinpaprika_id": "shib-shiba-inu"}
+}
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_USER_ID, "text": message}
+def get_price_cryptocompare(symbol, currency='EUR'):
     try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            st.error(f"Telegram Fehler: {response.json()}")
-    except Exception as e:
-        st.error(f"Telegram Nachricht konnte nicht gesendet werden: {e}")
+        url = f"https://min-api.cryptocompare.com/data/price?fsym={symbol}&tsyms={currency}"
+        r = requests.get(url, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        price = data.get(currency)
+        if price is None:
+            return None
+        return price
+    except:
+        return None
 
-def calculate_rsi(prices, window=14):
+def get_price_coinpaprika(coin_id, currency='eur'):
+    if not coin_id:
+        return None
+    try:
+        url = f"https://api.coinpaprika.com/v1/tickers/{coin_id}"
+        r = requests.get(url, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        price = data['quotes'][currency.upper()]['price']
+        return price
+    except:
+        return None
+
+# RSI-Berechnung (vereinfacht)
+def compute_rsi(prices, window=14):
     delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window).mean()
+    avg_loss = loss.rolling(window).mean()
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-# CoinGecko Datenabruf (für Coins mit CoinGecko-ID)
-@st.cache_data(ttl=900)
-def fetch_coingecko_data(symbol, days=30):
-    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=eur&days={days}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    prices = r.json().get("prices", [])
-    if not prices:
-        return None
-    df = pd.DataFrame(prices, columns=["timestamp", "price"])
-    df["price"] = df["price"].astype(float)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df.set_index("timestamp", inplace=True)
-    df["rsi"] = calculate_rsi(df["price"])
-    return df
+st.title("📈 Krypto Alarm Dashboard mit CryptoCompare & Coinpaprika")
 
-# Bitpanda historische Preise (candles) abrufen
-@st.cache_data(ttl=900)
-def fetch_bitpanda_candles(symbol, days=30):
-    # symbol z.B. "VISION_EUR"
-    url = f"https://api.exchange.bitpanda.com/public/v1/candles?interval=1d&product_code={symbol}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    data = r.json().get("candles", [])
-    if not data:
-        return None
-    df = pd.DataFrame(data)
-    df["timestamp"] = pd.to_datetime(df["time"])
-    df.set_index("timestamp", inplace=True)
-    df["price"] = df["close"].astype(float)
-    df = df.sort_index()
-    df = df.tail(days)
-    df["rsi"] = calculate_rsi(df["price"])
-    return df
+for key, coin in coins.items():
+    symbol = coin['symbol']
+    st.header(f"{key.upper()}")
 
-# Bitpanda aktuellen Preis abrufen
-def fetch_bitpanda_price(symbol):
-    # symbol z.B. "VISION_EUR"
-    url = "https://api.exchange.bitpanda.com/public/v1/ticker"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    data = r.json()
-    for item in data:
-        if item.get("product_code") == symbol:
-            return float(item.get("last"))
-    return None
-
-# Analyse & Signal für Streamlit
-def analyze(df, coin, price=None):
-    if df is None or df.empty:
-        return f"{coin.upper()}: Keine Daten verfügbar"
-    latest = df.iloc[-1]
+    price = get_price_cryptocompare(symbol)
     if price is None:
-        price = latest["price"]
-    rsi = latest["rsi"]
+        price = get_price_coinpaprika(coin['coinpaprika_id'])
+    
+    if price is None:
+        st.warning(f"{key.upper()}: Kursdaten nicht verfügbar.")
+        continue
+    
+    st.write(f"Aktueller Preis: €{price:.6f}")
 
-    if rsi < 30:
-        signal = f"🚀 {coin.upper()}: €{round(price,4)} – Kaufempfehlung (RSI: {round(rsi,2)})"
-        send_telegram_message(signal)
-    elif rsi > 70:
-        signal = f"⚠️ {coin.upper()}: €{round(price,4)} – Verkaufssignal (RSI: {round(rsi,2)})"
-        send_telegram_message(signal)
-    else:
-        signal = f"📊 {coin.upper()}: €{round(price,4)} – Neutral/Beobachten (RSI: {round(rsi,2)})"
-    return signal
+    # Beispiel: Hol historische Daten von CryptoCompare (30 Tage) für RSI
+    try:
+        url_hist = f"https://min-api.cryptocompare.com/data/v2/histoday?fsym={symbol}&tsym=EUR&limit=30"
+        r = requests.get(url_hist)
+        r.raise_for_status()
+        data_hist = r.json()
+        prices = pd.Series([item['close'] for item in data_hist['Data']['Data']])
+        rsi = compute_rsi(prices)
+        latest_rsi = rsi.iloc[-1]
+        st.write(f"RSI (14 Tage): {latest_rsi:.2f}")
 
-# Social Sentiment (vereinfacht)
-def fetch_sentiment(coin):
-    trends = {
-        "xrp": "Bullish 📈",
-        "btc": "Neutral 😐",
-        "eth": "Bearish 📉",
-        "doge": "Neutral",
-        "floki": "Bullish",
-        "pepe": "Bearish",
-        "vechain": "Neutral",
-        "toshi": "Neutral",
-        "vision": "Bullish",
-        "zerebro": "Neutral",
-        "shiba-inu": "Bearish"
-    }
-    return trends.get(coin, "Unbekannt")
+        # Kauf-/Verkaufssignal basierend auf RSI
+        if latest_rsi < 30:
+            st.success("🚀 Kaufempfehlung (RSI < 30)")
+        elif latest_rsi > 70:
+            st.error("⚠️ Verkaufssignal (RSI > 70)")
+        else:
+            st.info("📊 Neutral / Abwarten")
 
-# === Streamlit UI ===
-st.set_page_config(page_title="Krypto Alarm Dashboard mit Bitpanda API", layout="centered")
-st.title("📈 Krypto Alarm Dashboard mit Bitpanda API")
-
-# Coins mit Bitpanda-Symbol vs CoinGecko-ID
-bitpanda_coins = {
-    "vision": "VISION_EUR",
-    "zerebro": "ZEREBRO_EUR",
-    "toshi": "TOSHI_EUR",
-}
-coingecko_coins = {
-    "xrp": "ripple",
-    "btc": "bitcoin",
-    "eth": "ethereum",
-    "doge": "dogecoin",
-    "floki": "floki",
-    "pepe": "pepe",
-    "vechain": "vechain",
-    "shiba-inu": "shiba-inu"
-}
-
-for coin, symbol in bitpanda_coins.items():
-    df = fetch_bitpanda_candles(symbol, days=30)
-    price = fetch_bitpanda_price(symbol)
-    st.subheader(f"{coin.upper()} – Analyse (Bitpanda)")
-    if df is not None and price is not None:
-        signal = analyze(df, coin, price)
-        st.write(signal)
-
-        # Chart mit Matplotlib
-        fig, ax = plt.subplots()
-        df["price"].plot(ax=ax, label="Preis", color="blue")
-        ax.set_title(f"{coin.upper()} Preis Chart (Bitpanda)")
-        ax.legend()
+        # Chart Preis + RSI
+        fig, ax1 = plt.subplots()
+        ax1.plot(prices.index, prices.values, color='blue', label='Preis (€)')
+        ax1.set_ylabel('Preis (€)', color='blue')
+        ax2 = ax1.twinx()
+        ax2.plot(rsi.index, rsi.values, color='orange', label='RSI')
+        ax2.axhline(30, color='green', linestyle='--')
+        ax2.axhline(70, color='red', linestyle='--')
+        ax2.set_ylabel('RSI', color='orange')
+        plt.title(f"{key.upper()} Preis & RSI")
         st.pyplot(fig)
-        st.info(f"📣 Social-Media-Trend: {fetch_sentiment(coin)}")
-    else:
-        st.warning(f"{coin.upper()}: Daten nicht verfügbar")
+    except Exception as e:
+        st.warning(f"Fehler bei historischen Daten für {key.upper()}: {e}")
 
-for coin, coingecko_id in coingecko_coins.items():
-    df = fetch_coingecko_data(coingecko_id, days=30)
-    st.subheader(f"{coin.upper()} – Analyse (CoinGecko)")
-    if df is not None and not df.empty:
-        signal = analyze(df, coin)
-        st.write(signal)
-
-        fig, ax = plt.subplots()
-        df["price"].plot(ax=ax, label="Preis", color="blue")
-        ax.set_title(f"{coin.upper()} Preis Chart (CoinGecko)")
-        ax.legend()
-        st.pyplot(fig)
-        st.info(f"📣 Social-Media-Trend: {fetch_sentiment(coin)}")
-    else:
-        st.warning(f"{coin.upper()}: Daten nicht verfügbar")
-
-st.caption("🔄 Aktualisierung alle 15 Minuten • RSI korrekt berechnet • Telegram-Benachrichtigung bei Kauf-/Verkaufssignalen")
+st.caption("Datenquelle: CryptoCompare & Coinpaprika • Aktualisierung automatisch bei jedem Laden")
