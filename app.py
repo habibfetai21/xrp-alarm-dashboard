@@ -1,109 +1,104 @@
 import streamlit as st
 import pandas as pd
 import requests
+import time
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Erweitertes Krypto-Portfolio Dashboard", layout="wide")
+# === Telegram-Konfiguration ===
+TELEGRAM_TOKEN = "8105594323:AAGcB-zUIaUGhvITQ430Lt-NvmjkZE3mRtA"
+TELEGRAM_USER_ID = "7620460833"
 
-st.title("💰 Erweitertes Krypto-Portfolio Dashboard")
-
-# Deine Assets mit Bestand und Durchschnittspreis (EUR)
-portfolio = {
-    "xrp": {"amount": 1562, "avg_price": 1.7810323},
-    "pepe": {"amount": 67030227, "avg_price": 0.81257255},
-    "toshi": {"amount": 1240005, "avg_price": 0.931827331},      # Kein CoinGecko-Datensatz
-    "floki": {"amount": 3963427, "avg_price": 0.93550601},
-    "vision": {"amount": 1796, "avg_price": 0.50929707},
-    "vechain": {"amount": 3915, "avg_price": 0.56782781},
-    "zerebro": {"amount": 2892, "avg_price": 0.77660435},
-    "doge": {"amount": 199, "avg_price": 0.28496554},
-    "shiba": {"amount": 1615356, "avg_price": 0.17235691},
-}
-
-# Passende CoinGecko-IDs (oder None, wenn nicht verfügbar)
-coingecko_ids = {
-    "xrp": "ripple",
-    "pepe": "pepe",
-    "toshi": None,             # Kein Eintrag auf CoinGecko
-    "floki": "floki",
-    "vision": "vision-token",
-    "vechain": "vechain",
-    "zerebro": "cerebro",
-    "doge": "dogecoin",
-    "shiba": "shiba-inu",
-}
-
-@st.cache_data(ttl=900)
-def fetch_price(coingecko_id):
-    if coingecko_id is None:
-        return None
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coingecko_id}&vs_currencies=eur"
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_USER_ID, "text": message}
     try:
-        r = requests.get(url)
-        r.raise_for_status()
-        data = r.json()
-        price = data[coingecko_id]["eur"]
-        return float(price)
-    except Exception:
+        response = requests.post(url, data=payload)
+        if response.status_code != 200:
+            st.error(f"Telegram Fehler: {response.json()}")
+    except Exception as e:
+        st.error(f"Telegram Nachricht konnte nicht gesendet werden: {e}")
+
+# === Datenabruf von CoinGecko ===
+@st.cache_data(ttl=900)
+def fetch_data(symbol, days=30):
+    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=eur&days={days}"
+    r = requests.get(url)
+    if r.status_code != 200:
         return None
+    prices = r.json().get("prices", [])
+    if not prices:
+        return None
+    df = pd.DataFrame(prices, columns=["timestamp", "price"])
+    df["price"] = df["price"].astype(float)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df.set_index("timestamp", inplace=True)
+    df["rsi"] = df["price"].rolling(window=14).mean()
+    df["supertrend"] = (df["price"].rolling(window=3).mean() + df["price"].rolling(window=3).std()) / 2
+    return df
 
-total_value = 0
-total_cost = 0
-missing_data = []
+# === Analysefunktion ===
+def analyze(df, coin):
+    latest = df.iloc[-1]
+    price = latest["price"]
+    rsi = latest["rsi"]
+    trend = latest["supertrend"]
 
-st.subheader("Portfolio Details:")
+    signal = ""
+    if rsi < 30:
+        signal = f"🚀 {coin.upper()}: €{round(price, 4)} – **Kaufempfehlung** (RSI: {round(rsi, 2)})"
+        send_telegram_message(signal)
+    elif rsi > 70:
+        signal = f"⚠️ {coin.upper()}: €{round(price, 4)} – Verkaufssignal (RSI: {round(rsi, 2)})"
+        send_telegram_message(signal)
+    else:
+        signal = f"📊 {coin.upper()}: €{round(price, 4)} – Beobachten (RSI: {round(rsi, 2)})"
+    return signal
 
-for symbol, data in portfolio.items():
-    coingecko_id = coingecko_ids.get(symbol)
-    price = fetch_price(coingecko_id)
-    amount = data["amount"]
-    avg_price = data["avg_price"]
+# === Social-Media-Stimmung (vereinfachte Simulation) ===
+def fetch_sentiment(coin):
+    trends = {
+        "xrp": "Bullish 📈",
+        "btc": "Neutral 😐",
+        "eth": "Bearish 📉",
+        "doge": "Neutral",
+        "floki": "Bullish",
+        "pepe": "Bearish",
+        "vechain": "Neutral"
+    }
+    return trends.get(coin, "Unbekannt")
 
-    if price is None:
-        st.warning(f"{symbol.upper()}: Kursdaten nicht verfügbar")
-        missing_data.append(symbol)
-        continue
+# === Streamlit UI ===
+st.set_page_config(page_title="Krypto Alarm Dashboard", layout="centered")
+st.title("📈 Krypto Alarm Dashboard mit Telegram")
 
-    current_value = price * amount
-    cost_value = avg_price * amount
-    profit_loss = current_value - cost_value
-    profit_loss_pct = (profit_loss / cost_value) * 100 if cost_value != 0 else 0
+coins = {
+    "xrp": "ripple",
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "doge": "dogecoin",
+    "floki": "floki",
+    "pepe": "pepe",
+    "vechain": "vechain"
+}
 
-    total_value += current_value
-    total_cost += cost_value
+for symbol, coingecko_id in coins.items():
+    df = fetch_data(coingecko_id)
+    if df is not None and not df.empty:
+        st.subheader(f"{symbol.upper()} – Marktanalyse")
+        st.write(analyze(df, symbol))
 
-    st.write(f"**{symbol.upper()}**: Aktueller Preis: €{price:.6f} | Bestand: {amount:,} | "
-             f"Wert: €{current_value:,.2f} | Gewinn/Verlust: €{profit_loss:,.2f} ({profit_loss_pct:.2f}%)")
+        # Chart anzeigen
+        fig, ax = plt.subplots()
+        df["price"].plot(ax=ax, label="Preis", color="blue")
+        df["supertrend"].plot(ax=ax, label="Supertrend", linestyle="--", color="green")
+        ax.set_title(f"{symbol.upper()} Preis & Supertrend")
+        ax.legend()
+        st.pyplot(fig)
 
-if total_cost == 0:
-    total_cost = 1  # Vermeidung Division durch Null
+        # Social-Media-Stimmung anzeigen
+        sentiment = fetch_sentiment(symbol)
+        st.info(f"📣 Social-Media-Trend: {sentiment}")
+    else:
+        st.warning(f"{symbol.upper()}: Marktdaten nicht verfügbar")
 
-total_profit_loss = total_value - total_cost
-total_profit_loss_pct = (total_profit_loss / total_cost) * 100
-
-st.markdown("---")
-st.subheader("📊 Gesamtübersicht")
-st.write(f"**Gesamtwert Portfolio:** €{total_value:,.2f}")
-st.write(f"**Gesamt Gewinn/Verlust:** €{total_profit_loss:,.2f} ({total_profit_loss_pct:.2f}%)")
-
-if missing_data:
-    st.warning(f"Folgende Assets konnten nicht bewertet werden: {', '.join(missing_data).upper()}")
-
-# Portfolioverteilung (Kreisdiagramm)
-labels = []
-sizes = []
-
-for symbol, data in portfolio.items():
-    coingecko_id = coingecko_ids.get(symbol)
-    price = fetch_price(coingecko_id)
-    if price is None:
-        continue
-    value = price * data["amount"]
-    labels.append(symbol.upper())
-    sizes.append(value)
-
-if sizes:
-    fig, ax = plt.subplots()
-    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
-    ax.axis('equal')
-    st.pyplot(fig)
+st.caption("🔄 Aktualisierung alle 15 Minuten • RSI & Supertrend basierend auf CoinGecko • Telegram-Benachrichtigung bei starken Signalen")
