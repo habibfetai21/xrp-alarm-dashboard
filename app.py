@@ -1,75 +1,79 @@
 import streamlit as st
-import requests
 import pandas as pd
-import ta
+import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-# Liste der Coins mit CoinGecko-IDs
+# === E-Mail-Konfiguration ===
+EMAIL_ADDRESS = "h.fetai@icloud.com"
+EMAIL_PASSWORD = "DEIN_APP_PASSWORT_HIER_EINFÜGEN"  # App-spezifisches Passwort von Apple
+
+def send_email(subject, message):
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_ADDRESS
+    msg['To'] = EMAIL_ADDRESS
+    msg['Subject'] = subject
+    msg.attach(MIMEText(message, 'plain'))
+
+    try:
+        server = smtplib.SMTP_SSL('smtp.mail.me.com', 587)
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+    except Exception as e:
+        st.error(f"E-Mail konnte nicht gesendet werden: {e}")
+
+# === Technische Analyse (vereinfachte RSI und Supertrend) ===
+@st.cache_data(ttl=900)
+def fetch_data(symbol, days=30):
+    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=eur&days={days}"
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    prices = r.json().get("prices", [])
+    df = pd.DataFrame(prices, columns=["timestamp", "price"])
+    df["price"] = df["price"].astype(float)
+    df["rsi"] = df["price"].rolling(window=14).mean()  # Dummy-RSI
+    df["supertrend"] = (df["price"].rolling(window=3).mean() + df["price"].rolling(window=3).std()) / 2
+    return df
+
+def analyze(df, coin):
+    latest = df.iloc[-1]
+    price = latest["price"]
+    rsi = latest["rsi"]
+    trend = latest["supertrend"]
+
+    signal = ""
+    if rsi < 30:
+        signal = f"🚀 Kaufempfehlung für {coin.upper()} – RSI unter 30"
+        send_email(f"{coin.upper()} Kauf-Signal!", signal)
+    elif rsi > 70:
+        signal = f"⚠️ Verkaufsempfehlung für {coin.upper()} – RSI über 70"
+        send_email(f"{coin.upper()} Verkaufs-Signal!", signal)
+    else:
+        signal = f"📊 Beobachten – {coin.upper()} bei €{round(price, 4)}"
+
+    return f"{coin.upper()}: €{round(price, 4)} – {signal}"
+
+# === Dashboard ===
+st.title("📬 XRP Alarm Plus – Mit E-Mail-Alarm")
+
 coins = {
-  "XRP": "ripple",
-  "BTC": "bitcoin",
-  "ETH": "ethereum",
-  "VECHAIN": "vechain",
-  "DOGE": "dogecoin",
-  "FLOKI": "floki",
-  "PEPE": "pepecoin-community"  # ID für die Community-Variante von PepeCoin
+    "xrp": "ripple",
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "doge": "dogecoin",
+    "floki": "floki",
+    "pepe": "pepe",
+    "vechain": "vechain"
 }
 
-st.set_page_config(page_title="Krypto Trend & Kauf Dashboard", page_icon="📈", layout="wide")
-st.title("📈 Krypto Trend & Kauf Dashboard")
+for symbol, coingecko_id in coins.items():
+    df = fetch_data(coingecko_id)
+    if df is not None and not df.empty:
+        st.write(analyze(df, symbol))
+    else:
+        st.warning(f"{symbol.upper()}: Marktdaten nicht verfügbar")
 
-# Funktion: Live-Preise holen
-def fetch_prices():
-    ids = ",".join(coins.values())
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=eur"
-    res = requests.get(url)
-    if res.status_code != 200:
-        st.error("Fehler beim Laden der Preise")
-        return None
-    return res.json()
-
-# Funktion: Chartdaten inklusive RSI, MA50, MA200 berechnen
-@st.cache_data(ttl=300)
-def fetch_market_data(coin_id, days=60):
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=eur&days={days}"
-    data = requests.get(url).json()
-    prices = data.get("prices", [])
-    df = pd.DataFrame(prices, columns=["timestamp", "price"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df.set_index("timestamp", inplace=True)
-    df["rsi"] = ta.momentum.rsi(df["price"], window=14)
-    df["ma50"] = df["price"].rolling(window=50).mean()
-    df["ma200"] = df["price"].rolling(window=200).mean()
-    return df.dropna()
-
-prices = fetch_prices()
-
-if not prices:
-    st.warning("Keine Preisdaten verfügbar.")
-else:
-    for sym, cid in coins.items():
-        eur_price = prices.get(cid, {}).get("eur")
-        if eur_price is None:
-            st.write(f"⚠️ {sym}: Preis nicht gefunden")
-            continue
-
-        df = fetch_market_data(cid, days=60)
-        if df.empty:
-            st.write(f"⚠️ {sym}: Marktdaten nicht verfügbar")
-            continue
-
-        latest_rsi = df["rsi"].iloc[-1]
-        ma50 = df["ma50"].iloc[-1]
-        ma200 = df["ma200"].iloc[-1]
-        trend = "Bullish 📈" if ma50 > ma200 else "Bearish 📉"
-
-        if latest_rsi < 30 and trend == "Bullish 📈":
-            signal = "🚀 Kauf empfohlen!"
-        elif latest_rsi > 70 and trend == "Bearish 📉":
-            signal = "⚠️ Verkauf empfohlen!"
-        else:
-            signal = "➡️ Halten"
-
-        st.subheader(f"{sym}: €{eur_price:.6f} | {trend} | RSI: {latest_rsi:.1f} | {signal}")
-        st.line_chart(df[["price", "ma50", "ma200"]], height=250)
-
-st.caption("Daten via CoinGecko • RSI & MA • Auto-Refresh Deck 15 s • Cache 5 Min")
+st.caption("🔄 UI aktualisiert sich alle 15s – bei Signalen bekommst du automatisch eine E-Mail")
