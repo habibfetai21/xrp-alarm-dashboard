@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
 import matplotlib.pyplot as plt
-import numpy as np
+from streamlit_autorefresh import st_autorefresh
 
 # === Telegram-Konfiguration ===
 TELEGRAM_TOKEN = "8105594323:AAGcB-zUIaUGhvITQ430Lt-NvmjkZE3mRtA"
@@ -19,119 +18,139 @@ def send_telegram_message(message):
     except Exception as e:
         st.error(f"Telegram Nachricht konnte nicht gesendet werden: {e}")
 
-# === RSI-Berechnung ===
-def calculate_rsi(prices, window=14):
+# === Automatische Seite alle 5 Sekunden neu laden ===
+st_autorefresh(interval=5 * 1000, limit=None, key="refresh")
+
+# === CoinGecko IDs & Bestände ===
+coins = {
+    "xrp": {"id": "ripple", "amount": 1562.17810323},
+    "pepe": {"id": "pepe", "amount": 67030227.81257255},
+    "toshi": {"id": "toshi-token", "amount": 1240005.931827331},
+    "floki": {"id": "floki", "amount": 3963427.93550601},
+    "vision": {"id": "vision", "amount": 1796.50929707},
+    "vechain": {"id": "vechain", "amount": 3915.56782781},
+    "zerebro": {"id": "zerebro", "amount": 2892.77660435},
+    "doge": {"id": "dogecoin", "amount": 199.28496554},
+    "shiba-inu": {"id": "shiba-inu", "amount": 1615356.17235691},
+}
+
+st.set_page_config(page_title="Erweitertes Krypto Dashboard", layout="wide")
+st.title("📈 Erweitertes Krypto Dashboard mit automatischer Aktualisierung")
+
+# === Funktionen ===
+@st.cache_data(ttl=300)
+def fetch_market_data(coin_id, vs_currency="eur", days=30):
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    params = {"vs_currency": vs_currency, "days": days}
+    r = requests.get(url, params=params)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+def calculate_rsi(prices, period=14):
     delta = prices.diff()
     gain = delta.clip(lower=0)
-    loss = -1 * delta.clip(upper=0)
-    avg_gain = gain.rolling(window=window, min_periods=window).mean()
-    avg_loss = loss.rolling(window=window, min_periods=window).mean()
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=period, min_periods=period).mean()
+    avg_loss = loss.rolling(window=period, min_periods=period).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-# === Datenabruf von CoinGecko ===
-@st.cache_data(ttl=60)
-def fetch_data(symbol, days=30):
-    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=eur&days={days}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    prices = r.json().get("prices", [])
-    if not prices:
-        return None
-    df = pd.DataFrame(prices, columns=["timestamp", "price"])
-    df["price"] = df["price"].astype(float)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df.set_index("timestamp", inplace=True)
-    df["rsi"] = calculate_rsi(df["price"])
-    return df
+def plot_price_and_rsi(df, coin_name):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    ax1.plot(df.index, df['price'], label="Preis (€)")
+    ax1.set_title(f"{coin_name.upper()} Preisverlauf")
+    ax1.legend()
+    ax1.grid()
 
-@st.cache_data(ttl=60)
-def fetch_market_cap(symbol):
-    url = f"https://api.coingecko.com/api/v3/coins/{symbol}"
+    ax2.plot(df.index, df['rsi'], label="RSI", color="orange")
+    ax2.axhline(70, color='red', linestyle='--', alpha=0.5)
+    ax2.axhline(30, color='green', linestyle='--', alpha=0.5)
+    ax2.set_title(f"{coin_name.upper()} RSI")
+    ax2.legend()
+    ax2.grid()
+    plt.tight_layout()
+    st.pyplot(fig)
+
+def fetch_marketcap(coin_id):
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
     r = requests.get(url)
     if r.status_code != 200:
         return None
     data = r.json()
-    market_cap = data.get("market_data", {}).get("market_cap", {}).get("eur", None)
-    return market_cap
+    return data.get("market_data", {}).get("market_cap", {}).get("eur", None)
 
-# === Analysefunktion mit RSI über verschiedene Zeiträume ===
-def analyze_rsi_multi(df):
-    results = {}
-    # Monat (30 Tage)
-    results["Monat"] = calculate_rsi(df["price"], window=14).iloc[-1]
-    # Woche (7 Tage)
-    week_data = df.last("7D")
-    results["Woche"] = calculate_rsi(week_data["price"], window=14).iloc[-1]
-    # Tag (1 Tag)
-    day_data = df.last("1D")
-    results["Tag"] = calculate_rsi(day_data["price"], window=14).iloc[-1]
-    # Stunde (1 Stunde)
-    # Achtung: CoinGecko liefert keine stündlichen Daten für days>1, daher nur wenn df genug feine Daten hat
-    hour_data = df.last("1H")
-    if len(hour_data) >= 14:
-        results["Stunde"] = calculate_rsi(hour_data["price"], window=14).iloc[-1]
+# === Hauptlogik ===
+total_portfolio_value = 0.0
+
+for symbol, data in coins.items():
+    st.subheader(f"{symbol.upper()} – Analyse")
+
+    coin_id = data["id"]
+    amount = data["amount"]
+
+    market_data = fetch_market_data(coin_id, days=30)
+    if not market_data:
+        st.warning(f"{symbol.upper()}: Kursdaten nicht verfügbar.")
+        continue
+
+    prices = pd.DataFrame(market_data['prices'], columns=["timestamp", "price"])
+    prices['timestamp'] = pd.to_datetime(prices['timestamp'], unit='ms')
+    prices.set_index('timestamp', inplace=True)
+
+    prices['rsi'] = calculate_rsi(prices['price'])
+
+    latest_price = prices['price'].iloc[-1]
+    latest_rsi = prices['rsi'].iloc[-1]
+
+    # Marketcap
+    marketcap = fetch_marketcap(coin_id)
+
+    # Portfolio Wert berechnen
+    portfolio_value = amount * latest_price
+    total_portfolio_value += portfolio_value
+
+    st.write(f"Aktueller Kurs: €{latest_price:.6f}")
+    st.write(f"Bestand: {amount:.4f} ⇒ Wert: €{portfolio_value:.2f}")
+    if marketcap:
+        st.write(f"Marktkapitalisierung: €{marketcap:,.0f}")
     else:
-        results["Stunde"] = None
-    # Sekunde – für Sekundendaten bräuchte man eine andere API (nicht hier implementiert)
-    results["Sekunde"] = None
-    return results
+        st.write("Marktkapitalisierung: Nicht verfügbar")
 
-# === Streamlit UI ===
-st.set_page_config(page_title="Krypto Alarm Dashboard", layout="centered")
-st.title("📈 Krypto Alarm Dashboard mit Telegram & Multi-Zeitraum RSI")
+    # RSI-Werte für verschiedene Zeiträume
+    # Für die Zeiträume 1 Monat (30 Tage), 1 Woche (7 Tage), 1 Tag (1 Tag), 1 Stunde (1/24 Tag), 1 Minute (1/1440 Tag)
+    st.write("RSI Werte (letzte Werte pro Zeitraum):")
+    try:
+        rsi_month = prices['rsi'][-30*24*60:] if len(prices) > 30*24*60 else prices['rsi']
+        rsi_week = prices['rsi'][-7*24*60:] if len(prices) > 7*24*60 else prices['rsi']
+        rsi_day = prices['rsi'][-24*60:] if len(prices) > 24*60 else prices['rsi']
+        rsi_hour = prices['rsi'][-60:] if len(prices) > 60 else prices['rsi']
+        rsi_minute = prices['rsi'][-1:]
+        st.write(f"- Monat (30 Tage): {rsi_month.iloc[-1]:.2f}")
+        st.write(f"- Woche (7 Tage): {rsi_week.iloc[-1]:.2f}")
+        st.write(f"- Tag: {rsi_day.iloc[-1]:.2f}")
+        st.write(f"- Stunde: {rsi_hour.iloc[-1]:.2f}")
+        st.write(f"- Minute: {rsi_minute.iloc[-1]:.2f}")
+    except Exception as e:
+        st.write("RSI-Daten nicht ausreichend für alle Zeiträume.")
 
-coins = {
-    "xrp": "ripple",
-    "btc": "bitcoin",
-    "eth": "ethereum",
-    "doge": "dogecoin",
-    "floki": "floki",
-    "pepe": "pepe",
-    "vechain": "vechain",
-    "toshi": "toshi",
-    "vision": "vision",
-    "zerebro": "zerebro",
-    "shiba-inu": "shiba-inu"
-}
-
-# Automatische Aktualisierung alle 5 Sekunden
-st_autorefresh = st.experimental_singleton(lambda: st.experimental_rerun())
-count = st_autorefresh()
-
-for symbol, coingecko_id in coins.items():
-    df = fetch_data(coingecko_id, days=30)
-    market_cap = fetch_market_cap(coingecko_id)
-
-    st.subheader(f"{symbol.upper()} – Marktanalyse")
-
-    if df is not None and not df.empty:
-        rsi_values = analyze_rsi_multi(df)
-
-        # Ausgabe Market Cap
-        if market_cap:
-            st.write(f"💰 Market Cap: €{market_cap:,.0f}")
-        else:
-            st.write("Market Cap: Nicht verfügbar")
-
-        # RSI-Werte über Zeiträume
-        st.write("📊 RSI-Werte:")
-        for period, rsi in rsi_values.items():
-            if rsi is not None and not pd.isna(rsi):
-                st.write(f"- {period}: {rsi:.2f}")
-            else:
-                st.write(f"- {period}: Nicht verfügbar")
-
-        # Chart anzeigen
-        fig, ax = plt.subplots()
-        df["price"].plot(ax=ax, label="Preis", color="blue")
-        df["rsi"].plot(ax=ax, label="RSI (14)", color="orange")
-        ax.set_title(f"{symbol.upper()} Preis & RSI")
-        ax.legend()
-        st.pyplot(fig)
+    # Kauf-/Verkaufsempfehlung anhand RSI
+    signal = ""
+    if latest_rsi < 30:
+        signal = f"🚀 {symbol.upper()}: Kaufempfehlung (RSI {latest_rsi:.2f})"
+        send_telegram_message(signal)
+    elif latest_rsi > 70:
+        signal = f"⚠️ {symbol.upper()}: Verkaufssignal (RSI {latest_rsi:.2f})"
+        send_telegram_message(signal)
     else:
-        st.warning(f"{symbol.upper()}: Marktdaten nicht verfügbar")
+        signal = f"ℹ️ {symbol.upper()}: Neutral, beobachten (RSI {latest_rsi:.2f})"
 
-st.caption("🔄 Automatische Aktualisierung alle 5 Sekunden • Marktcap via CoinGecko • RSI für Monat, Woche, Tag, Stunde")
+    st.info(signal)
+
+    # Chart anzeigen
+    plot_price_and_rsi(prices, symbol)
+
+st.markdown(f"## Gesamtwert Portfolio: €{total_portfolio_value:.2f}")
+
+st.caption("🔄 Automatische Aktualisierung alle 5 Sekunden • Daten von CoinGecko • RSI & Marketcap inklusive • Telegram-Benachrichtigungen bei Kaufsignalen")
