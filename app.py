@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import requests
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Erweitertes Krypto-Portfolio Dashboard", layout="wide")
 
 st.title("💰 Erweitertes Krypto-Portfolio Dashboard")
 
-# === Portfolio mit Bestand (Anzahl, Durchschnittspreis in EUR) ===
+# Deine Assets mit Bestand und Durchschnittspreis (EUR)
 portfolio = {
     "xrp": {"amount": 1562, "avg_price": 1.7810323},
     "pepe": {"amount": 67030227, "avg_price": 0.81257255},
@@ -19,11 +20,11 @@ portfolio = {
     "shiba": {"amount": 1615356, "avg_price": 0.17235691},
 }
 
-# === CoinGecko-IDs (für Preisdaten) ===
+# Passende CoinGecko-IDs (oder None, wenn nicht verfügbar)
 coingecko_ids = {
     "xrp": "ripple",
     "pepe": "pepe",
-    "toshi": None,             # Kein offizieller CoinGecko-Eintrag
+    "toshi": None,             # Kein Eintrag auf CoinGecko
     "floki": "floki",
     "vision": "vision-token",
     "vechain": "vechain",
@@ -39,6 +40,7 @@ def fetch_price(coingecko_id):
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={coingecko_id}&vs_currencies=eur"
     try:
         r = requests.get(url)
+        r.raise_for_status()
         data = r.json()
         price = data[coingecko_id]["eur"]
         return float(price)
@@ -87,27 +89,21 @@ st.write(f"**Gesamt Gewinn/Verlust:** €{total_profit_loss:,.2f} ({total_profit
 if missing_data:
     st.warning(f"Folgende Assets konnten nicht bewertet werden: {', '.join(missing_data).upper()}")
 
-# Optional: kleine Chart-Darstellung für Portfolioverteilung
-try:
-    import matplotlib.pyplot as plt
+# Portfolioverteilung (Kreisdiagramm)
+labels = []
+sizes = []
 
-    labels = []
-    sizes = []
+for symbol, data in portfolio.items():
+    coingecko_id = coingecko_ids.get(symbol)
+    price = fetch_price(coingecko_id)
+    if price is None:
+        continue
+    value = price * data["amount"]
+    labels.append(symbol.upper())
+    sizes.append(value)
 
-    for symbol, data in portfolio.items():
-        coingecko_id = coingecko_ids.get(symbol)
-        price = fetch_price(coingecko_id)
-        if price is None:
-            continue
-        value = price * data["amount"]
-        labels.append(symbol.upper())
-        sizes.append(value)
-
-    if sizes:
-        fig, ax = plt.subplots()
-        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
-        ax.axis('equal')
-        st.pyplot(fig)
-
-except ImportError:
-    st.info("Für die Darstellung der Portfolioverteilung ist matplotlib nötig.")
+if sizes:
+    fig, ax = plt.subplots()
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
+    ax.axis('equal')
+    st.pyplot(fig)
