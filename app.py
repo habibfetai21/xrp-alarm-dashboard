@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 import requests
 import plotly.graph_objs as go
-import time
+from datetime import datetime
 
 st.set_page_config(page_title="Krypto-Dashboard", layout="wide")
-st.title("📊 Krypto Dashboard – Live mit CoinPaprika Backup & RSI")
+st.title("📊 Krypto Dashboard – Live mit CoinPaprika Backup, RSI & Portfolio")
 
 # Coins & IDs
 coins = {
@@ -27,7 +27,6 @@ fallback_prices = {
     "TOSHI": 0.000032, "VISION": 0.085, "ZEREBRO": 0.015
 }
 
-# Preis & Historie
 @st.cache_data(ttl=60)
 def fetch_gecko_prices():
     ids = ",".join(coins.values())
@@ -66,7 +65,6 @@ def calc_rsi(prices, period=14):
     rs = avg_gain / avg_loss
     return round(100 - (100 / (1 + rs)), 2)
 
-# Manuelle Aktualisierung
 if st.button("🔄 Aktualisieren"):
     st.cache_data.clear()
 
@@ -96,8 +94,10 @@ for coin, cg_id in coins.items():
     else:
         st.info(f"{coin}: Keine Historie verfügbar ({source})")
 
+st.header("📦 Portfolio-Werte (Fallback)")
+
 for coin, amt in portfolio.items():
-    st.markdown(f"### {coin} (Eigenbestand)")
+    st.markdown(f"### {coin} – {amt:,.2f} Stück")
     price = fallback_prices.get(coin)
     st.metric("Preis (Fallback)", f"€{price:.7f}")
     st.metric("Marktwert", f"€{price * amt:,.2f}")
