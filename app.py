@@ -1,132 +1,123 @@
 import streamlit as st
 import pandas as pd
 import requests
-import datetime
-import plotly.graph_objs as go
+import numpy as np
 import time
+import plotly.graph_objs as go
+from datetime import datetime, timedelta
 
-# BLOCK 1 – Einstellungen & Coin-Liste
-st.set_page_config(page_title="Krypto Dashboard", layout="wide")
+# ========== Konfiguration ==========
+st.set_page_config(page_title="Krypto-Dashboard", layout="wide", initial_sidebar_state="collapsed")
+st.markdown("<h1 style='text-align: center;'>📊 Krypto-Dashboard (Live & RSI)</h1>", unsafe_allow_html=True)
 
-# Benutzerdefinierte Coins und ihre Bestände
+# ========== Deine Coins ==========
 portfolio = {
-    "xrp": 4023.87,
-    "pepe": 1526000,
-    "toshi": 1240005.9318,
-    "floki": 210000,
-    "vision": 1796.5093,
-    "vechain": 2600,
-    "zerebro": 2892.7766,
-    "dogecoin": 395,
-    "shiba-inu": 195000
+    "XRP": 1257.09,
+    "PEPE": 123567890.123,
+    "TOSHI": 1240005.9318,
+    "FLOKI": 302000.87,
+    "VISION": 1796.5093,
+    "VECHAIN": 6000,
+    "ZEREBRO": 2892.7766,
+    "DOGE": 1200,
+    "SHIBA": 8000000
 }
 
-# CoinGecko IDs (bitte bei Bedarf anpassen!)
+# CoinGecko IDs
 coingecko_ids = {
-    "xrp": "ripple",
-    "pepe": "pepe",
-    "toshi": "toshi",
-    "floki": "floki",
-    "vision": None,
-    "vechain": "vechain",
-    "zerebro": None,
-    "dogecoin": "dogecoin",
-    "shiba-inu": "shiba-inu"
+    "XRP": "ripple",
+    "PEPE": "pepe",
+    "FLOKI": "floki",
+    "DOGE": "dogecoin",
+    "SHIBA": "shiba-inu",
+    "VECHAIN": "vechain"
 }
 
+# Fallback-Preise (nur falls API ausfällt)
 fallback_prices = {
-    "toshi": 0.000032,
-    "vision": 0.085,
-    "zerebro": 0.015
+    "TOSHI": 0.000032,
+    "VISION": 0.085,
+    "ZEREBRO": 0.015
 }
 
-# BLOCK 2 – Preis & RSI-Funktionen
-@st.cache_data(ttl=60)
-def get_price(coin_id):
-    if coin_id is None:
-        return None
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=eur&include_market_cap=true"
-    try:
-        r = requests.get(url)
-        r.raise_for_status()
-        return r.json()[coin_id]
-    except:
-        return None
+# ========== Funktionen ==========
 
-@st.cache_data(ttl=60)
-def fetch_candle_data(coin_id, days=30):
-    if coin_id is None:
-        return None
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=eur&days={days}&interval=daily"
+def get_price_and_marketcap(coin):
+    if coin in fallback_prices:
+        price = fallback_prices[coin]
+        marketcap = None
+        return price, marketcap
+
     try:
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coingecko_ids[coin]}&vs_currencies=eur&include_market_cap=true"
         r = requests.get(url)
         data = r.json()
-        prices = data["prices"]
-        df = pd.DataFrame(prices, columns=["timestamp", "price"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        df.set_index("timestamp", inplace=True)
-        return df
+        price = data[coingecko_ids[coin]]["eur"]
+        marketcap = data[coingecko_ids[coin]].get("eur_market_cap")
+        return price, marketcap
     except:
+        return None, None
+
+def get_rsi(prices, period=14):
+    if len(prices) < period:
         return None
+    delta = np.diff(prices)
+    gain = np.where(delta > 0, delta, 0)
+    loss = np.where(delta < 0, -delta, 0)
+    avg_gain = np.mean(gain[-period:])
+    avg_loss = np.mean(loss[-period:])
+    rs = avg_gain / avg_loss if avg_loss != 0 else 0
+    return round(100 - (100 / (1 + rs)), 2)
 
-def calculate_rsi(df, period: int = 14):
-    if df is None or df.empty or len(df) < period:
-        return None
-    delta = df["price"].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+def fetch_ohlc_data(coin_id, days=30):
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=eur&days={days}&interval=daily"
+        r = requests.get(url)
+        data = r.json()
+        prices = [p[1] for p in data["prices"]]
+        return prices
+    except:
+        return []
 
-# BLOCK 3 – Automatische Aktualisierung (kompatibel mit Streamlit Cloud)
-placeholder = st.empty()
-refresh_interval = 5  # Sekunden
-
-with st.sidebar:
-    st.markdown("🕒 **Automatische Aktualisierung**")
-    progress_bar = st.progress(0)
-    count = st.empty()
-
-    for i in range(refresh_interval):
-        progress_bar.progress(i / refresh_interval)
-        count.markdown(f"Aktualisierung in **{refresh_interval - i} Sekunden**...")
-        time.sleep(1)
-
-    st.rerun()
-
-# Hauptbereich – Analyse für alle Coins
-st.title("📊 Krypto Portfolio Analyse mit RSI & Live-Daten")
-
+# ========== Dashboard Ausgabe ==========
 for coin, amount in portfolio.items():
-    st.subheader(f"{coin.upper()} – Analyse")
-
-    coin_id = coingecko_ids.get(coin)
-    price_data = get_price(coin_id)
-    price = price_data["eur"] if price_data else fallback_prices.get(coin)
-
+    st.markdown(f"### {coin} – Analyse")
+    price, marketcap = get_price_and_marketcap(coin)
+    
     if price:
-        market_value = price * amount
-        st.metric(f"{coin.upper()} ➤ Aktueller Preis", f"€{price:,.5f}")
-        st.metric(f"{coin.upper()} ➤ Marktwert Bestand", f"€{market_value:,.2f}")
+        value = round(price * amount, 2)
+        st.markdown(f"**➤ Aktueller Preis:** €{price:.5f}")
+        st.markdown(f"**➤ Marktwert Bestand:** €{value:.2f}")
+        if marketcap:
+            st.markdown(f"**➤ MarketCap:** €{marketcap:,.0f}")
     else:
-        st.warning(f"{coin.upper()}: ❌ Kursdaten nicht verfügbar (CoinGecko)")
+        st.error(f"{coin}: ❌ Kursdaten nicht verfügbar (CoinGecko)")
 
-    # RSI Analyse & Chart
-    df = fetch_candle_data(coin_id)
-    if df is not None:
-        for period, label in zip([14, 7, 30], ["Tage", "1 Woche", "1 Monat"]):
-            rsi = calculate_rsi(df, period)
-            if rsi is not None:
-                last_rsi = round(rsi.iloc[-1], 2)
-                signal = "🟢 Kauf" if last_rsi < 30 else "🔴 Verkauf" if last_rsi > 70 else "⚪ Neutral"
-                st.write(f"**RSI ({label}):** {last_rsi} – {signal}")
-        
-        # Chart anzeigen
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df["price"], name="Preisverlauf"))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info(f"{coin.upper()}: Keine Chartdaten verfügbar – Fallback-Preis verwendet.")
+    # RSI-Berechnung (verschiedene Zeiträume)
+    if coin in coingecko_ids:
+        prices_30d = fetch_ohlc_data(coingecko_ids[coin], days=30)
+        prices_7d = fetch_ohlc_data(coingecko_ids[coin], days=7)
+        prices_1d = fetch_ohlc_data(coingecko_ids[coin], days=1)
+
+        if prices_30d:
+            rsi_m = get_rsi(prices_30d)
+            rsi_w = get_rsi(prices_7d)
+            rsi_d = get_rsi(prices_1d)
+
+            st.markdown(f"📊 **RSI Monat:** `{rsi_m}` | Woche: `{rsi_w}` | Tag: `{rsi_d}`")
+
+            # Performance-Chart (letzte 30 Tage)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(y=prices_30d, mode='lines', name=f'{coin} Preis'))
+            fig.update_layout(title=f"{coin} – 30-Tage Preisverlauf", height=300, margin=dict(l=10, r=10, t=30, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning(f"{coin}: Keine Chartdaten verfügbar – Fallback-Preis verwendet.")
+
+    st.divider()
+
+# ========== Automatische Aktualisierung ==========
+st.markdown("🔄 Automatische Aktualisierung alle **5 Sekunden** (Streamlit Cloud kompatibel)")
+st_autorefresh = st.empty()
+time.sleep(5)
+st.rerun()
