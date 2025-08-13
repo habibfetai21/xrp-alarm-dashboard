@@ -3,67 +3,108 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# --- CONFIG ---
+# --- Ordner für Cache/CSV-Dateien ---
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-# --- FUNKTIONEN ---
-@st.cache_data
-def load_data(filename):
+# --- Dummy-Daten erstellen, falls CSVs nicht existieren ---
+dummy_files = {
+    "Möbelix_monatlich.csv": {
+        "Datum":["2025-01","2025-02","2025-03","2025-04","2025-05"],
+        "Suchvolumen":[1200,1350,1500,1600,1550]
+    },
+    "Mömax_monatlich.csv": {
+        "Datum":["2025-01","2025-02","2025-03","2025-04","2025-05"],
+        "Suchvolumen":[900,950,1100,1200,1250]
+    },
+    "Küchenplanung_monatlich.csv": {
+        "Datum":["2025-01","2025-02","2025-03","2025-04","2025-05"],
+        "Suchvolumen":[2000,2100,2200,2300,2400]
+    },
+    "kuechenarten.csv": {
+        "Küchenart":["Moderne Küche","Landhausküche","Designküche","Kompaktküche"],
+        "Suchvolumen":[1500,1200,900,600]
+    },
+    "bundeslaender.csv": {
+        "Bundesland":["Wien","Niederösterreich","Oberösterreich","Steiermark","Salzburg","Tirol","Vorarlberg","Kärnten","Burgenland"],
+        "Suchvolumen":[2000,1500,1300,1100,900,800,700,600,500]
+    },
+    "kuechengeraete.csv": {
+        "Marke":["Bosch","Siemens","AEG","Miele","Samsung"],
+        "Suchvolumen":[1200,1100,900,800,700]
+    },
+    "hersteller.csv": {
+        "Marke":["Nobilia","Häcker","Leicht","Poggenpohl"],
+        "Suchvolumen":[1500,1300,900,600]
+    },
+    "online_marken.csv": {
+        "Marke":["Nobilia","Häcker","Leicht","Poggenpohl"],
+        "Käufe":[500,400,300,200]
+    }
+}
+
+# Dateien anlegen, wenn sie noch nicht existieren
+for filename, data in dummy_files.items():
     path = CACHE_DIR / filename
-    if path.exists():
-        return pd.read_csv(path)
-    else:
-        st.warning(f"{filename} nicht gefunden. Bitte CSV-Datei erstellen.")
-        return pd.DataFrame()
+    if not path.exists():
+        df = pd.DataFrame(data)
+        df.to_csv(path, index=False)
 
-def plot_trend(df, column="Suchvolumen", title="Trend"):
-    if df.empty:
-        st.info("Keine Daten zum Anzeigen")
-        return
-    plt.figure(figsize=(10,5))
-    plt.plot(pd.to_datetime(df['Datum']), df[column], marker='o')
-    plt.title(title)
-    plt.xticks(rotation=45)
-    plt.grid(True)
-    st.pyplot(plt)
+# --- Streamlit Dashboard ---
+st.title("Küchenmarkt Dashboard Österreich")
 
-# --- DASHBOARD ---
-st.title("Küchen & Möbel Markt Dashboard Österreich")
+st.header("1️⃣ Monatliches Suchvolumen")
+def plot_monatlich(file, title):
+    df = pd.read_csv(CACHE_DIR / file)
+    st.subheader(title)
+    fig, ax = plt.subplots()
+    ax.plot(df['Datum'], df['Suchvolumen'], marker='o')
+    ax.set_xlabel("Monat")
+    ax.set_ylabel("Suchvolumen")
+    ax.set_xticklabels(df['Datum'], rotation=45)
+    st.pyplot(fig)
 
-# 1️⃣ Keywords Übersicht
-st.header("Suchvolumen Übersicht")
-keywords = ["Möbelix", "Mömax", "Küchenplanung"]
-for kw in keywords:
-    df_kw = load_data(f"{kw}_monatlich.csv")
-    st.subheader(f"{kw} (monatlich)")
-    plot_trend(df_kw, column="Suchvolumen", title=f"{kw} Trend")
+plot_monatlich("Möbelix_monatlich.csv", "Möbelix (monatlich)")
+plot_monatlich("Mömax_monatlich.csv", "Mömax (monatlich)")
+plot_monatlich("Küchenplanung_monatlich.csv", "Küchenplanung (monatlich)")
 
-# 2️⃣ Küchenarten
-st.header("Beliebte Küchenarten")
-df_kuechen = load_data("kuechenarten.csv")
-if not df_kuechen.empty:
-    st.bar_chart(df_kuechen.set_index("Küchenart")["Suchvolumen"])
+st.header("2️⃣ Beliebte Küchenarten")
+df_kuechenarten = pd.read_csv(CACHE_DIR / "kuechenarten.csv")
+fig, ax = plt.subplots()
+ax.bar(df_kuechenarten['Küchenart'], df_kuechenarten['Suchvolumen'], color='skyblue')
+ax.set_ylabel("Suchvolumen")
+ax.set_xticklabels(df_kuechenarten['Küchenart'], rotation=45)
+st.pyplot(fig)
 
-# 3️⃣ Bundesländer Analyse
-st.header("Suchvolumen nach Bundesland")
-df_bundesland = load_data("bundeslaender.csv")
-if not df_bundesland.empty:
-    st.bar_chart(df_bundesland.set_index("Bundesland")["Suchvolumen"])
+st.header("3️⃣ Suchvolumen nach Bundesland")
+df_bundeslaender = pd.read_csv(CACHE_DIR / "bundeslaender.csv")
+fig, ax = plt.subplots()
+ax.bar(df_bundeslaender['Bundesland'], df_bundeslaender['Suchvolumen'], color='orange')
+ax.set_ylabel("Suchvolumen")
+ax.set_xticklabels(df_bundeslaender['Bundesland'], rotation=45)
+st.pyplot(fig)
 
-# 4️⃣ Küchengeräte & Hersteller
-st.header("Top Küchengeräte & Hersteller")
-df_geraete = load_data("kuechengeraete.csv")
-df_hersteller = load_data("hersteller.csv")
-if not df_geraete.empty:
-    st.subheader("Küchengeräte")
-    st.bar_chart(df_geraete.set_index("Marke")["Suchvolumen"])
-if not df_hersteller.empty:
-    st.subheader("Hersteller")
-    st.bar_chart(df_hersteller.set_index("Marke")["Suchvolumen"])
+st.header("4️⃣ Top Küchengeräte & Hersteller")
+df_geraete = pd.read_csv(CACHE_DIR / "kuechengeraete.csv")
+st.subheader("Küchengeräte")
+fig, ax = plt.subplots()
+ax.bar(df_geraete['Marke'], df_geraete['Suchvolumen'], color='green')
+ax.set_ylabel("Suchvolumen")
+ax.set_xticklabels(df_geraete['Marke'], rotation=45)
+st.pyplot(fig)
 
-# 5️⃣ Meistgekaufte Marken online
-st.header("Meistgekaufte Küchenmarken online")
-df_online = load_data("online_marken.csv")
-if not df_online.empty:
-    st.bar_chart(df_online.set_index("Marke")["Käufe"])
+df_hersteller = pd.read_csv(CACHE_DIR / "hersteller.csv")
+st.subheader("Küchenhersteller")
+fig, ax = plt.subplots()
+ax.bar(df_hersteller['Marke'], df_hersteller['Suchvolumen'], color='purple')
+ax.set_ylabel("Suchvolumen")
+ax.set_xticklabels(df_hersteller['Marke'], rotation=45)
+st.pyplot(fig)
+
+st.header("5️⃣ Meistgekaufte Küchenmarken online")
+df_online = pd.read_csv(CACHE_DIR / "online_marken.csv")
+fig, ax = plt.subplots()
+ax.bar(df_online['Marke'], df_online['Käufe'], color='red')
+ax.set_ylabel("Anzahl Käufe")
+ax.set_xticklabels(df_online['Marke'], rotation=45)
+st.pyplot(fig)
