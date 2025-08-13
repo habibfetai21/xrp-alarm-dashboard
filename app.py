@@ -14,7 +14,7 @@ def load_data(filename):
     if path.exists():
         return pd.read_csv(path)
     else:
-        st.warning(f"{filename} nicht gefunden. Bitte erst Daten vorbereiten.")
+        st.warning(f"{filename} nicht gefunden. Bitte CSV-Datei erstellen.")
         return pd.DataFrame()
 
 def plot_trend(df, column="Suchvolumen", title="Trend"):
