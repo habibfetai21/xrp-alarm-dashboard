@@ -1,5 +1,6 @@
-streamlit
-pandas
-matplotlib
-plotly
-pytrends
+streamlit==1.26.0
+pytrends==4.10.0
+pandas==2.1.1
+plotly==5.18.0
+matplotlib==3.8.1
+numpy==1.26.2
