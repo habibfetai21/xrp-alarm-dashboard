@@ -1,92 +1,69 @@
-# app.py
 import streamlit as st
-from pytrends.request import TrendReq
 import pandas as pd
-import plotly.express as px
-import time
+import matplotlib.pyplot as plt
+from pathlib import Path
 
-st.set_page_config(page_title="Küchen & Möbel Trends Österreich", layout="wide")
-st.title("📊 Küchen- & Möbel-Trends in Österreich 🇦🇹")
+# --- CONFIG ---
+CACHE_DIR = Path("cache")
+CACHE_DIR.mkdir(exist_ok=True)
 
-# Pytrends Setup
-pytrends = TrendReq(hl='de-AT', tz=360)
+# --- FUNKTIONEN ---
+@st.cache_data
+def load_data(filename):
+    path = CACHE_DIR / filename
+    if path.exists():
+        return pd.read_csv(path)
+    else:
+        st.warning(f"{filename} nicht gefunden. Bitte erst Daten vorbereiten.")
+        return pd.DataFrame()
 
-# Kategorien mit Keywords
-trend_groups = {
-    "Möbel & Küchenplanung": ["Möbelix", "Mömax", "Küchenplanung"],
-    "Küchenarten": ["Landhausküche", "Moderne Küche", "Designküche"],
-    "Küchengeräte-Marken": ["Bosch Küche", "Siemens Küche", "AEG Küche"],
-    "Küchenhersteller": ["Nobilia", "Häcker Küche", "IKEA Küche"]
-}
+def plot_trend(df, column="Suchvolumen", title="Trend"):
+    if df.empty:
+        st.info("Keine Daten zum Anzeigen")
+        return
+    plt.figure(figsize=(10,5))
+    plt.plot(pd.to_datetime(df['Datum']), df[column], marker='o')
+    plt.title(title)
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    st.pyplot(plt)
 
-# Zeitraum-Auswahl
-timeframes = {
-    "Letzte 12 Monate": "today 12-m",
-    "Letzte 5 Jahre": "today 5-y"
-}
-selected_timeframe = st.selectbox("Zeitraum auswählen", list(timeframes.keys()))
-timeframe = timeframes[selected_timeframe]
+# --- DASHBOARD ---
+st.title("Küchen & Möbel Markt Dashboard Österreich")
 
-# Funktion mit Cache + Wartezeit
-@st.cache_data(ttl=86400)
-def get_trends(keyword, timeframe):
-    time.sleep(5)  # Anti-Blockade
-    pytrends.build_payload([keyword], cat=0, timeframe=timeframe, geo='AT', gprop='')
-    df_time = pytrends.interest_over_time()
-    df_region = pytrends.interest_by_region(resolution='region', inc_low_vol=True)
-    return df_time, df_region
+# 1️⃣ Keywords Übersicht
+st.header("Suchvolumen Übersicht")
+keywords = ["Möbelix", "Mömax", "Küchenplanung"]
+for kw in keywords:
+    df_kw = load_data(f"{kw}_monatlich.csv")
+    st.subheader(f"{kw} (monatlich)")
+    plot_trend(df_kw, column="Suchvolumen", title=f"{kw} Trend")
 
-# Funktion für Top-Marken (Ranking)
-@st.cache_data(ttl=86400)
-def get_top_keywords(keywords, timeframe):
-    scores = {}
-    for kw in keywords:
-        try:
-            df_time, _ = get_trends(kw, timeframe)
-            if not df_time.empty:
-                scores[kw] = df_time[kw].mean()
-        except:
-            scores[kw] = 0
-    top_df = pd.DataFrame.from_dict(scores, orient='index', columns=['Score']).sort_values(by='Score', ascending=False)
-    return top_df
+# 2️⃣ Küchenarten
+st.header("Beliebte Küchenarten")
+df_kuechen = load_data("kuechenarten.csv")
+if not df_kuechen.empty:
+    st.bar_chart(df_kuechen.set_index("Küchenart")["Suchvolumen"])
 
-# Schleife durch jede Kategorie
-for group_name, keywords in trend_groups.items():
-    st.subheader(f"📌 {group_name}")
+# 3️⃣ Bundesländer Analyse
+st.header("Suchvolumen nach Bundesland")
+df_bundesland = load_data("bundeslaender.csv")
+if not df_bundesland.empty:
+    st.bar_chart(df_bundesland.set_index("Bundesland")["Suchvolumen"])
 
-    # Zeit- und Regionsdaten kombinieren
-    data_time_combined = pd.DataFrame()
-    data_region_combined = pd.DataFrame()
-    for kw in keywords:
-        df_time, df_region = get_trends(kw, timeframe)
-        if not df_time.empty:
-            data_time_combined[kw] = df_time[kw]
-        if not df_region.empty:
-            df_region = df_region.rename(columns={kw: "Wert"}).reset_index()
-            df_region["Keyword"] = kw
-            data_region_combined = pd.concat([data_region_combined, df_region])
+# 4️⃣ Küchengeräte & Hersteller
+st.header("Top Küchengeräte & Hersteller")
+df_geraete = load_data("kuechengeraete.csv")
+df_hersteller = load_data("hersteller.csv")
+if not df_geraete.empty:
+    st.subheader("Küchengeräte")
+    st.bar_chart(df_geraete.set_index("Marke")["Suchvolumen"])
+if not df_hersteller.empty:
+    st.subheader("Hersteller")
+    st.bar_chart(df_hersteller.set_index("Marke")["Suchvolumen"])
 
-    # Zeitverlauf anzeigen
-    if not data_time_combined.empty:
-        data_time_combined = data_time_combined.reset_index()
-        fig_time = px.line(data_time_combined, x='date', y=keywords, title=f"Interesse über Zeit – {group_name}")
-        st.plotly_chart(fig_time, use_container_width=True)
-
-    # Bundesländer anzeigen
-    if not data_region_combined.empty:
-        fig_region = px.bar(
-            data_region_combined,
-            x='geoName',
-            y='Wert',
-            color='Keyword',
-            barmode='group',
-            title=f"Beliebtheit nach Bundesland – {group_name}"
-        )
-        st.plotly_chart(fig_region, use_container_width=True)
-
-# 🔹 Top 10 Online-Küchenmarken
-st.subheader("🏆 Top Online Küchenmarken in Österreich (Ranking nach Suchvolumen)")
-all_manufacturers = ["Nobilia", "Häcker Küche", "IKEA Küche", "Leicht", "Poggenpohl", "Bulthaup", "Schüller", "Next125", "Pino", "Wellmann"]
-top_keywords_df = get_top_keywords(all_manufacturers, timeframe)
-fig_top = px.bar(top_keywords_df.head(10), x=top_keywords_df.head(10).index, y='Score', title="Top Online Küchenmarken")
-st.plotly_chart(fig_top, use_container_width=True)
+# 5️⃣ Meistgekaufte Marken online
+st.header("Meistgekaufte Küchenmarken online")
+df_online = load_data("online_marken.csv")
+if not df_online.empty:
+    st.bar_chart(df_online.set_index("Marke")["Käufe"])
